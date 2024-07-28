@@ -398,16 +398,18 @@ namespace Ray.BiliBiliTool.DomainService
         public async Task SendDanmakuToFansMedalLive()
         {
             if (!await CheckLiveCookie()) return;
-
-            (await GetFansMedalInfoList()).ForEach(async info =>
+        
+            var fansMedalInfoList = await GetFansMedalInfoList();
+            
+            foreach (var info in fansMedalInfoList)
             {
                 var medal = info.MedalInfo;
-
+        
                 _logger.LogInformation("【直播间】{liveRoomName}", medal.Target_name);
                 _logger.LogInformation("【粉丝牌】{medalName}", medal.Medal_info.Medal_name);
-
+        
                 _logger.LogInformation("正在发送弹幕...");
-
+        
                 // 通过空间主页信息获取直播间 id
                 var liveHostUserId = medal.Medal_info.Target_id;
                 var req = new GetSpaceInfoDto()
@@ -415,30 +417,62 @@ namespace Ray.BiliBiliTool.DomainService
                     mid = liveHostUserId
                 };
                 await _wbiService.SetWridAsync(req);
-
+        
                 var spaceInfo = await _userInfoApi.GetSpaceInfo(req);
                 if (spaceInfo.Code != 0)
                 {
                     _logger.LogError("【获取直播间信息】失败");
                     _logger.LogError("【原因】{message}", spaceInfo.Message);
-                    return;
+                    continue;
                 }
-
-                // 发送弹幕
-                var sendResult = await _liveApi.SendLiveDanmuku(new SendLiveDanmukuRequest(
-                    _biliCookie.BiliJct,
-                    spaceInfo.Data.Live_room.Roomid,
-                    _liveFansMedalTaskOptions.DanmakuContent));
-
-                if (sendResult.Code != 0)
+        
+                var name = spaceInfo.Data.Name;
+                var roomId = spaceInfo.Data.Live_room.Roomid;
+                var danmakuSends = 0; // 记录已发送弹幕的数量
+                var retry = 0; // 重试次数
+        
+                while (danmakuSends < 10)
                 {
-                    _logger.LogError("【弹幕发送】失败");
-                    _logger.LogError("【原因】{message}", sendResult.Message);
-                    return;
+                    // 发送弹幕
+                    var sendResult = await _liveApi.SendLiveDanmuku(new SendLiveDanmukuRequest(
+                        _biliCookie.BiliJct,
+                        roomId,
+                        _liveFansMedalTaskOptions.DanmakuContent));
+        
+                    if (sendResult.Code == 0)
+                    {
+                        danmakuSends++;
+                        _logger.LogInformation($"【弹幕发送】第 {danmakuSends} 条成功! 主播 {name}", danmakuSends, name);
+                    }
+                    else
+                    {
+                        if (retry < 3)
+                        {
+                            retry++;
+                            _logger.LogError("【弹幕发送】第 {danmakuSends} 条失败, 主播 {name}, 重试[{retry}]...", danmakuSends, name,  retry);
+                            _logger.LogError("【原因】{message}", sendResult.Message);
+                        }
+                        else
+                        {
+                            _logger.LogError("【弹幕发送】第 {danmakuSends} 条失败, 主播 {name},  超过 {retry} 重试次数, 跳过!", danmakuSends, name, retry);
+                            break; // 如果发送失败，则停止尝试
+                        }
+                    }
+        
+                    // 随机延迟
+                    var delay = new Random().Next(10000, 20000);
+                    await Task.Delay(delay);
                 }
-
-                _logger.LogInformation("【弹幕发送】成功~，你和主播 {name} 的亲密值增加了100！", spaceInfo.Data.Name);
-            });
+        
+                if (danmakuSends == 10)
+                {
+                    _logger.LogInformation("【弹幕发送】10次成功~ 主播 {name} 的亲密值增加了70！", name);
+                }
+                else
+                {
+                    _logger.LogError("【弹幕发送】主播 {name}, 未完成全部10次发送，仅发送了{danmakuSends}次!!", name, danmakuSends);
+                }
+            }
         }
 
         public async Task SendHeartBeatToFansMedalLive()
