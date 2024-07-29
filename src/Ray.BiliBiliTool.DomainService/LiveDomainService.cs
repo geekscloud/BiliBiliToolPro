@@ -450,9 +450,9 @@ namespace Ray.BiliBiliTool.DomainService
         
                         if (sendResult.Code == 0)
                         {
-                            _logger.LogInformation($"【弹幕发送】成功({successCounts[Name]}/10)! 主播 {Name}");
                             sendSuccess = true;
                             successCounts[Name]++;
+                            _logger.LogInformation($"【弹幕发送】成功({successCounts[Name]}/10)! 主播 {Name}");
                         }
                         else
                         {
