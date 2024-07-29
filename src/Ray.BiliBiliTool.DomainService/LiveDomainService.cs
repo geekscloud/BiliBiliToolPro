@@ -435,7 +435,7 @@ namespace Ray.BiliBiliTool.DomainService
             {
                 foreach (var (Name, RoomId) in roomInfos)
                 {
-                    _logger.LogInformation("【直播间】{liveRoomName}, 正在发送弹幕...", Name);
+                    //_logger.LogInformation("【直播间】{liveRoomName}, 正在发送弹幕...", Name);
         
                     int sendAttempts = 0; // 当前房间的发送尝试次数
                     bool sendSuccess = false; // 是否成功发送
@@ -450,7 +450,7 @@ namespace Ray.BiliBiliTool.DomainService
         
                         if (sendResult.Code == 0)
                         {
-                            _logger.LogInformation($"【弹幕发送】成功! 主播 {Name}");
+                            _logger.LogInformation($"【弹幕发送】成功({successCounts[Name]}/10)! 主播 {Name}");
                             sendSuccess = true;
                             successCounts[Name]++;
                         }
@@ -459,7 +459,7 @@ namespace Ray.BiliBiliTool.DomainService
                             if (sendAttempts < 3)
                             {
                                 sendAttempts++;
-                                _logger.LogError("【弹幕发送】失败, 主播 {Name}, 重试[{sendAttempts}]...", Name, sendAttempts);
+                                _logger.LogError("【弹幕发送】失败({successCounts[Name]}/10), 主播 {Name}, 重试[{sendAttempts}]...", Name, sendAttempts);
                                 _logger.LogError("【原因】{message}", sendResult.Message);
                             }
                             else
