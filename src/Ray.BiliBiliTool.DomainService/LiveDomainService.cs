@@ -400,25 +400,19 @@ namespace Ray.BiliBiliTool.DomainService
             if (!await CheckLiveCookie()) return;
         
             var fansMedalInfoList = await GetFansMedalInfoList();
-            
+        
+            // 获取所有房间的信息并存储到一个列表中
+            List<(string Name, long RoomId)> roomInfos = new List<(string Name, long RoomId)>();
+        
             foreach (var info in fansMedalInfoList)
             {
                 var medal = info.MedalInfo;
-        
-                _logger.LogInformation("【直播间】{liveRoomName}", medal.Target_name);
-                _logger.LogInformation("【粉丝牌】{medalName}", medal.Medal_info.Medal_name);
-        
-                _logger.LogInformation("正在发送弹幕...");
-        
-                // 通过空间主页信息获取直播间 id
                 var liveHostUserId = medal.Medal_info.Target_id;
-                var req = new GetSpaceInfoDto()
-                {
-                    mid = liveHostUserId
-                };
-                await _wbiService.SetWridAsync(req);
+                var req = new GetSpaceInfoDto() { mid = liveHostUserId };
         
+                await _wbiService.SetWridAsync(req);
                 var spaceInfo = await _userInfoApi.GetSpaceInfo(req);
+        
                 if (spaceInfo.Code != 0)
                 {
                     _logger.LogError("【获取直播间信息】失败");
@@ -426,51 +420,72 @@ namespace Ray.BiliBiliTool.DomainService
                     continue;
                 }
         
-                var name = spaceInfo.Data.Name;
-                var roomId = spaceInfo.Data.Live_room.Roomid;
-                var danmakuSends = 0; // 记录已发送弹幕的数量
-                var retry = 0; // 重试次数
+                roomInfos.Add((spaceInfo.Data.Name, spaceInfo.Data.Live_room.Roomid));
+            }
         
-                while (danmakuSends < 10)
+            // 初始化每个房间的成功次数
+            Dictionary<string, int> successCounts = new Dictionary<string, int>();
+            foreach (var (Name, RoomId) in roomInfos)
+            {
+                successCounts[Name] = 0;
+            }
+        
+            // 对每个房间循环发送弹幕
+            for (int i = 0; i < 10; i++)
+            {
+                foreach (var (Name, RoomId) in roomInfos)
                 {
-                    // 发送弹幕
-                    var sendResult = await _liveApi.SendLiveDanmuku(new SendLiveDanmukuRequest(
-                        _biliCookie.BiliJct,
-                        roomId,
-                        _liveFansMedalTaskOptions.DanmakuContent));
+                    _logger.LogInformation("【直播间】{liveRoomName}, 正在发送弹幕...", Name);
         
-                    if (sendResult.Code == 0)
+                    int sendAttempts = 0; // 当前房间的发送尝试次数
+                    bool sendSuccess = false; // 是否成功发送
+        
+                    while (sendAttempts < 4 && !sendSuccess)
                     {
-                        danmakuSends++;
-                        _logger.LogInformation($"【弹幕发送】第 {danmakuSends} 条成功! 主播 {name}", danmakuSends, name);
-                    }
-                    else
-                    {
-                        if (retry < 3)
+                        // 发送弹幕
+                        var sendResult = await _liveApi.SendLiveDanmuku(new SendLiveDanmukuRequest(
+                            _biliCookie.BiliJct,
+                            RoomId,
+                            _liveFansMedalTaskOptions.DanmakuContent));
+        
+                        if (sendResult.Code == 0)
                         {
-                            retry++;
-                            _logger.LogError("【弹幕发送】第 {danmakuSends} 条失败, 主播 {name}, 重试[{retry}]...", danmakuSends, name,  retry);
-                            _logger.LogError("【原因】{message}", sendResult.Message);
+                            _logger.LogInformation($"【弹幕发送】成功! 主播 {Name}");
+                            sendSuccess = true;
+                            successCounts[Name]++;
                         }
                         else
                         {
-                            _logger.LogError("【弹幕发送】第 {danmakuSends} 条失败, 主播 {name},  超过 {retry} 重试次数, 跳过!", danmakuSends, name, retry);
-                            break; // 如果发送失败，则停止尝试
+                            if (sendAttempts < 3)
+                            {
+                                sendAttempts++;
+                                _logger.LogError("【弹幕发送】失败, 主播 {Name}, 重试[{sendAttempts}]...", Name, sendAttempts);
+                                _logger.LogError("【原因】{message}", sendResult.Message);
+                            }
+                            else
+                            {
+                                _logger.LogError("【弹幕发送】失败, 主播 {Name}, 超过 {sendAttempts} 重试次数, 跳过!", Name, sendAttempts);
+                                break;
+                            }
                         }
+        
+                        // 随机延迟
+                        var delay = new Random().Next(10000, 20000);
+                        await Task.Delay(delay);
                     }
-        
-                    // 随机延迟
-                    var delay = new Random().Next(10000, 20000);
-                    await Task.Delay(delay);
                 }
+            }
         
-                if (danmakuSends == 10)
+            // 所有房间都发送完10条弹幕后记录结果
+            foreach (var (Name, RoomId) in roomInfos)
+            {
+                if (successCounts[Name] == 10)
                 {
-                    _logger.LogInformation("【弹幕发送】10次成功~ 主播 {name} 的亲密值增加了70！", name);
+                    _logger.LogInformation("【弹幕发送】10次成功~ 主播 {Name} 的亲密值增加了70！", Name);
                 }
                 else
                 {
-                    _logger.LogError("【弹幕发送】主播 {name}, 未完成全部10次发送，仅发送了{danmakuSends}次!!", name, danmakuSends);
+                    _logger.LogError("【弹幕发送】主播 {Name}, 未完成全部10次发送，仅发送了{successCounts[Name]}次!!", Name, successCounts[Name]);
                 }
             }
         }
